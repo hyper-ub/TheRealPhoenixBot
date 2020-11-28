@@ -37,7 +37,7 @@
       },
       "OWNER_USERNAME": {
          "description": "Your username",
-         "value": "TheRealPhoenix"
+         "value": "Itz_kora"
       },
       "PORT": {
          "description": "Port to use for your webhooks.",
@@ -85,8 +85,8 @@
       "best",
       "group",
       "manager",
-      "phoenix"
+      "kora"
    ],
-   "name": "Phoenix",
-   "repository": "https://github.com/rsktg/TheRealPhoenixBot"
+   "name": "Kora",
+   "repository": "https://github.com/rsktg/Koragroup_bot"
 }
