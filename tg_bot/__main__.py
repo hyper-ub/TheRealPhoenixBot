@@ -1,46 +1,38 @@
+import datetime
 import importlib
 import re
-import json
-import requests
 from typing import Optional, List
-from parsel import Selector
-from urllib.request import urlopen
-from sys import argv
-from pyrogram import idle, Client
+
 from telegram import Message, Chat, Update, Bot, User
 from telegram import ParseMode, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.error import Unauthorized, BadRequest, TimedOut, NetworkError, ChatMigrated, TelegramError
-from telegram.ext import CommandHandler, MessageHandler, CallbackQueryHandler, Filters
-from telegram.ext.dispatcher import run_async, DispatcherHandlerStop
+from telegram.ext import CommandHandler, Filters, MessageHandler, CallbackQueryHandler
+from telegram.ext.dispatcher import run_async, DispatcherHandlerStop, Dispatcher
 from telegram.utils.helpers import escape_markdown
 
-from tg_bot import dispatcher, updater, TOKEN, WEBHOOK, OWNER_ID, CERT_PATH, PORT, URL, LOGGER, \
-    ALLOW_EXCL,oko,pbot
+from tg_bot import dispatcher, updater, TOKEN, WEBHOOK, OWNER_ID, DONATION_LINK, CERT_PATH, PORT, URL, LOGGER, \
+    ALLOW_EXCL
 # needed to dynamically load modules
 # NOTE: Module order is not guaranteed, specify that in the config file!
 from tg_bot.modules import ALL_MODULES
-from tg_bot import dispatcher
-from tg_bot.modules.disable import DisableAbleCommandHandler
 from tg_bot.modules.helper_funcs.chat_status import is_user_admin
 from tg_bot.modules.helper_funcs.misc import paginate_modules
 
-
-
 PM_START_TEXT = """
-
-Hi {}, My name is {} ! 
-I am a group management bot.
-Build by weebs for weebs, I specialize in managing groups.
-You can find my list of available commands with :
+Hi {}, my name is {}
+I am a group management bot.	
+Build by weebs for weebs, I specialize in managing groups.	
+You can find my list of available commands with :	
 👉 /help.
 """
 
-BOT_IMG = "https://telegra.ph/file/2fbf54ecf569496431507.jpg"
-
+BOT_IMAGE = "https://telegra.ph/file/2fbf54ecf569496431507.jpg"
 
 HELP_STRINGS = """
-
-Hello! my name *{}*.
+Hey there! My name is *{}*.
+I'm a modular group management bot with a few fun extras! Have a look at the following for an idea of some of \
+the things I can help you with.
+If you have any questions on how to use me, head over to @KoraSupport
 
 *Main* commands available:
  - /start: start the bot
@@ -49,11 +41,14 @@ Hello! my name *{}*.
  - /settings:
    - in PM: will send you your settings for all supported modules.
    - in a group: will redirect you to pm, with all that chat's settings.
+
 {}
 And the following:
 """.format(dispatcher.bot.first_name, "" if not ALLOW_EXCL else "\nAll commands can either be used with / or !.\n")
 
-
+DONATE_STRING = """{0} doesn't currently need any donations.
+However you can donate to the creator of the original source code which {0} \
+is based on:- [PayPal](paypal.me/PaulSonOfLars), or [Monzo](monzo.me/paulnionvestergaardlarsen).""".format(dispatcher.bot.first_name)
 
 IMPORTED = {}
 MIGRATEABLE = []
@@ -65,6 +60,8 @@ DATA_EXPORT = []
 
 CHAT_SETTINGS = {}
 USER_SETTINGS = {}
+
+GDPR = []
 
 for module_name in ALL_MODULES:
     imported_module = importlib.import_module("tg_bot.modules." + module_name)
@@ -85,6 +82,9 @@ for module_name in ALL_MODULES:
 
     if hasattr(imported_module, "__stats__"):
         STATS.append(imported_module)
+
+    if hasattr(imported_module, "__gdpr__"):
+        GDPR.append(imported_module)
 
     if hasattr(imported_module, "__user_info__"):
         USER_INFO.append(imported_module)
@@ -119,14 +119,14 @@ def test(bot: Bot, update: Update):
     update.effective_message.reply_text("This person edited a message")
     print(update.effective_message)
 
+
 @run_async
 def start(bot: Bot, update: Update, args: List[str]):
     if update.effective_chat.type == "private":
         if len(args) >= 1:
             if args[0].lower() == "help":
                 send_help(update.effective_chat.id, HELP_STRINGS)
-            elif args[0].lower() == "disasters":
-                IMPORTED["disasters"].send_disasters(update)
+
             elif args[0].lower().startswith("stngs_"):
                 match = re.match("stngs_(.*)", args[0].lower())
                 chat = dispatcher.bot.getChat(match.group(1))
@@ -141,43 +141,23 @@ def start(bot: Bot, update: Update, args: List[str]):
 
         else:
             first_name = update.effective_user.first_name
-            update.effective_message.reply_photo(
-                BOT_IMG,
-                PM_START_TEXT.format(escape_markdown(first_name), escape_markdown(bot.first_name), OWNER_ID),
+            update.effective_message.reply_animation(
+                BOT_IMAGE,
+                caption=PM_START_TEXT.format(escape_markdown(first_name), escape_markdown(bot.first_name), OWNER_ID),
                 parse_mode=ParseMode.MARKDOWN,
                 reply_markup=InlineKeyboardMarkup(
-                    [[
-                        InlineKeyboardButton(
-                            text="Add Kora to your group",
-                            url="t.me/{}?startgroup=true".format(bot.username))
-                    ],
                     [
-                        InlineKeyboardButton(
-                            text="Support Chat ",
-                            url=f"https://t.me/KoraSupport"),
-                        InlineKeyboardButton(
-                            text="Updates ",
-                            url="https://t.me/koraupdates")
-                    ],
-                    [
-                        InlineKeyboardButton(
-                            text="help",
-                            callback_data="help_back")
-                    ]]))
-                                                                 
-
-
+                        [
+                            InlineKeyboardButton(
+                                text="Add Kora to your group.",
+                                url="t.me/{}?startgroup=botstart".format(bot.username),
+                            )
+                        ]
+                    ]
+                ),
+            )
     else:
-        update.effective_message.reply_text("HI, Why u summoned me")
-
-
-def send_start(bot, update):
-    #Try to remove old message
-    try:
-        query = update.callback_query
-        query.message.delete()
-    except:
-        Pass
+        update.effective_message.reply_text("Yo, why'd you summon me?")
 
 
 # for test purposes
@@ -221,33 +201,32 @@ def help_button(bot: Bot, update: Update):
             module = mod_match.group(1)
             text = "Here is the help for the *{}* module:\n".format(HELPABLE[module].__mod_name__) \
                    + HELPABLE[module].__help__
-            query.message.reply_text(text=text,
+            query.message.edit_text(text=text,
                                      parse_mode=ParseMode.MARKDOWN,
                                      reply_markup=InlineKeyboardMarkup(
                                          [[InlineKeyboardButton(text="Back", callback_data="help_back")]]))
 
         elif prev_match:
             curr_page = int(prev_match.group(1))
-            query.message.reply_text(HELP_STRINGS,
+            query.message.edit_text(HELP_STRINGS,
                                      parse_mode=ParseMode.MARKDOWN,
                                      reply_markup=InlineKeyboardMarkup(
                                          paginate_modules(curr_page - 1, HELPABLE, "help")))
 
         elif next_match:
             next_page = int(next_match.group(1))
-            query.message.reply_text(HELP_STRINGS,
+            query.message.edit_text(HELP_STRINGS,
                                      parse_mode=ParseMode.MARKDOWN,
                                      reply_markup=InlineKeyboardMarkup(
                                          paginate_modules(next_page + 1, HELPABLE, "help")))
 
         elif back_match:
-            query.message.reply_text(text=HELP_STRINGS,
+            query.message.edit_text(text=HELP_STRINGS,
                                      parse_mode=ParseMode.MARKDOWN,
                                      reply_markup=InlineKeyboardMarkup(paginate_modules(0, HELPABLE, "help")))
 
         # ensure no spinny white circle
         bot.answer_callback_query(query.id)
-        query.message.delete()
     except BadRequest as excp:
         if excp.message == "Message is not modified":
             pass
@@ -282,72 +261,6 @@ def get_help(bot: Bot, update: Update):
 
     else:
         send_help(chat.id, HELP_STRINGS)
-
-def imdb_searchdata(bot: Bot, update: Update):
-    query_raw = update.callback_query
-    query = query_raw.data.split('$')
-    print(query)
-    if query[1] != query_raw.from_user.username:
-        return
-    title = ''
-    rating = ''
-    date = ''
-    synopsis = ''
-    url_sel = 'https://www.imdb.com/title/%s/' % (query[0])
-    text_sel = requests.get(url_sel).text
-    selector_global = Selector(text = text_sel)
-    title = selector_global.xpath('//div[@class="title_wrapper"]/h1/text()').get().strip()
-    try:
-        rating = selector_global.xpath('//div[@class="ratingValue"]/strong/span/text()').get().strip()
-    except:
-        rating = '-'
-    try:
-        date = '(' + selector_global.xpath('//div[@class="title_wrapper"]/h1/span/a/text()').getall()[-1].strip() + ')'
-    except:
-        date = selector_global.xpath('//div[@class="subtext"]/a/text()').getall()[-1].strip()
-    try:
-        synopsis_list = selector_global.xpath('//div[@class="summary_text"]/text()').getall()
-        synopsis = re.sub(' +',' ', re.sub(r'\([^)]*\)', '', ''.join(sentence.strip() for sentence in synopsis_list)))
-    except:
-        synopsis = '_No synopsis available._'
-    movie_data = '*%s*, _%s_\n★ *%s*\n\n%s' % (title, date, rating, synopsis)
-    query_raw.edit_message_text(
-        movie_data, 
-        parse_mode=ParseMode.MARKDOWN
-    )
-
-@run_async
-def imdb(bot: Bot, update: Update, args):
-    message = update.effective_message
-    query = ''.join([arg + '_' for arg in args]).lower()
-    if not query:
-        bot.send_message(
-            message.chat.id,
-            'You need to specify a movie/show name!'
-        )
-        return
-    url_suggs = 'https://v2.sg.media-imdb.com/suggests/%s/%s.json' % (query[0], query)
-    json_url = urlopen(url_suggs)
-    suggs_raw = ''
-    for line in json_url:
-        suggs_raw = line
-    skip_chars = 6 + len(query)
-    suggs_dict = json.loads(suggs_raw[skip_chars:][:-1])
-    if suggs_dict:
-        button_list = [[
-                InlineKeyboardButton(
-                    text = str(sugg['l'] + ' (' + str(sugg['y']) + ')'), 
-                    callback_data = str(sugg['id']) + '$' + str(message.from_user.username)
-                )] for sugg in suggs_dict['d'] if 'y' in sugg
-        ]
-        reply_markup = InlineKeyboardMarkup(button_list)
-        bot.send_message(
-            message.chat.id,
-            'Which one? ',
-            reply_markup = reply_markup
-        )
-    else:
-        pass
 
 
 def send_settings(chat_id, user_id, user=False):
@@ -390,7 +303,8 @@ def settings_button(bot: Bot, update: Update):
             module = mod_match.group(2)
             chat = bot.get_chat(chat_id)
             text = "*{}* has the following settings for the *{}* module:\n\n".format(escape_markdown(chat.title),
-                                                                                     CHAT_SETTINGS[module].__mod_name__) + \
+                                                                                     CHAT_SETTINGS[
+                                                                                         module].__mod_name__) + \
                    CHAT_SETTINGS[module].__chat_settings__(chat_id, user.id)
             query.message.reply_text(text=text,
                                      parse_mode=ParseMode.MARKDOWN,
@@ -464,6 +378,27 @@ def get_settings(bot: Bot, update: Update):
         send_settings(chat.id, user.id, True)
 
 
+@run_async
+def donate(bot: Bot, update: Update):
+    user = update.effective_message.from_user
+    chat = update.effective_chat  # type: Optional[Chat]
+
+    if chat.type == "private":
+        update.effective_message.reply_text(DONATE_STRING, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
+
+        if OWNER_ID != 254318997 and DONATION_LINK:
+            update.effective_message.reply_text("You can also donate to the person currently running me "
+                                                "[here]({})".format(DONATION_LINK),
+                                                parse_mode=ParseMode.MARKDOWN)
+
+    else:
+        try:
+            bot.send_message(user.id, DONATE_STRING, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
+
+            update.effective_message.reply_text("I've PM'ed you about donating to my creator!")
+        except Unauthorized:
+            update.effective_message.reply_text("Contact me in PM first to get donation information.")
+
 
 def migrate_chats(bot: Bot, update: Update):
     msg = update.effective_message  # type: Optional[Message]
@@ -488,18 +423,13 @@ def main():
     test_handler = CommandHandler("test", test)
     start_handler = CommandHandler("start", start, pass_args=True)
 
-    start_callback_handler = CallbackQueryHandler(send_start, pattern=r"bot_start")
-    
-
     help_handler = CommandHandler("help", get_help)
     help_callback_handler = CallbackQueryHandler(help_button, pattern=r"help_")
-    
-    IMDB_HANDLER = CommandHandler("imdb", imdb, pass_args=True)
-    IMDB_SEARCHDATA_HANDLER = CallbackQueryHandler(imdb_searchdata)
+
     settings_handler = CommandHandler("settings", get_settings)
     settings_callback_handler = CallbackQueryHandler(settings_button, pattern=r"stngs_")
 
-   
+    donate_handler = CommandHandler("donate", donate)
     migrate_handler = MessageHandler(Filters.status_update.migrate, migrate_chats)
 
     # dispatcher.add_handler(test_handler)
@@ -509,10 +439,12 @@ def main():
     dispatcher.add_handler(help_callback_handler)
     dispatcher.add_handler(settings_callback_handler)
     dispatcher.add_handler(migrate_handler)
-    dispatcher.add_handler(start_callback_handler)
-    dispatcher.add_handler(IMDB_HANDLER)
-    dispatcher.add_handler(IMDB_SEARCHDATA_HANDLER)
+    dispatcher.add_handler(donate_handler)
+
     # dispatcher.add_error_handler(error_callback)
+
+    # add antiflood processor
+    Dispatcher.process_update = process_update
 
     if WEBHOOK:
         LOGGER.info("Using webhooks.")
@@ -527,21 +459,70 @@ def main():
             updater.bot.set_webhook(url=URL + TOKEN)
 
     else:
-        LOGGER.info("kora is working ......")
+        LOGGER.info("Using long polling.")
         updater.start_polling(timeout=15, read_latency=4)
-
-    if len(argv) not in (1, 3, 4):
-        oko.disconnect()
-    else:
-        oko.run_until_disconnected()
 
     updater.idle()
 
 
+CHATS_CNT = {}
+CHATS_TIME = {}
+
+
+def process_update(self, update):
+    # An error happened while polling
+    if isinstance(update, TelegramError):
+        try:
+            self.dispatch_error(None, update)
+        except Exception:
+            self.logger.exception('An uncaught error was raised while handling the error')
+        return
+
+    if not update.effective_chat:
+        return
+
+    now = datetime.datetime.utcnow()
+    cnt = CHATS_CNT.get(update.effective_chat.id, 0)
+
+    t = CHATS_TIME.get(update.effective_chat.id, datetime.datetime(1970, 1, 1))
+    if t and now > t + datetime.timedelta(0, 1):
+        CHATS_TIME[update.effective_chat.id] = now
+        cnt = 0
+    else:
+        cnt += 1
+
+    if cnt > 10:
+        return
+
+    CHATS_CNT[update.effective_chat.id] = cnt
+    for group in self.groups:
+        try:
+            for handler in (x for x in self.handlers[group] if x.check_update(update)):
+                handler.handle_update(update, self)
+                break
+
+        # Stop processing with any other handler.
+        except DispatcherHandlerStop:
+            self.logger.debug('Stopping further handlers due to DispatcherHandlerStop')
+            break
+
+        # Dispatch any error.
+        except TelegramError as te:
+            self.logger.warning('A TelegramError was raised while processing the Update')
+
+            try:
+                self.dispatch_error(update, te)
+            except DispatcherHandlerStop:
+                self.logger.debug('Error handler stopped further handlers')
+                break
+            except Exception:
+                self.logger.exception('An uncaught error was raised while handling the error')
+
+        # Errors should not stop the thread.
+        except Exception:
+            self.logger.exception('An uncaught error was raised while processing the update')
+
+
 if __name__ == '__main__':
     LOGGER.info("Successfully loaded modules: " + str(ALL_MODULES))
-    oko.start(bot_token=TOKEN)
-    pbot.start()
     main()
-    idle()
-    LOGGER.info("Successfully loaded") 
