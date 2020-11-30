@@ -19,3 +19,4 @@ coffeehouse
 tswift
 pyrate-limiter
 parsel
+pyrogram
